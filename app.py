@@ -17,7 +17,7 @@ if st.button("Submit"):
             'x-rapidapi-host': "linkedin-scraper-api-real-time-fast-affordable.p.rapidapi.com"
         }
 
-        conn.request("GET", "/profile/detail?username=neal-mohan", headers=headers)
+        conn.request("GET", "/profile/detail?username="+user_input, headers=headers)
         res = conn.getresponse()
         data = res.read()
         parsed = json.loads(data.decode("utf-8"))
