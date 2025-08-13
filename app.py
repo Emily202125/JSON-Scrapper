@@ -1,16 +1,16 @@
 import os
 import json
-import http.client
-from urllib.parse import quote_plus
+import time
+import random
+from urllib.parse import quote_plus, urlparse
+import requests
 import streamlit as st
 
 st.title("LinkedIn JSON Scraper")
-
-# Top-of-page status placeholder (shows which key succeeded)
-top_msg = st.empty()
+top_msg = st.empty()  # banner placeholder
 
 HOST = "linkedin-scraper-api-real-time-fast-affordable.p.rapidapi.com"
-PATH = "/profile/detail?username={slug}"
+BASE_URL = f"https://{HOST}/profile/detail?username={{slug}}"
 
 def _val(name, default):
     return os.getenv(name) or default
@@ -22,6 +22,18 @@ API_KEYS = [
     _val("RAPIDAPI_KEY_4",       "b7122951abmsh59bbe65684d72a0p1f1b76jsn95b884c46942"),
 ]
 
+CONNECT_TIMEOUT = 6
+READ_TIMEOUT = 18
+MAX_RETRIES_PER_KEY = 2  # total tries per key = 1 + this value
+TRANSIENT_STATUSES = {408, 425, 500, 502, 503, 504}
+QUOTA_STATUSES = {429, 401, 403}
+
+HEADERS_BASE = {
+    "x-rapidapi-host": HOST,
+    "Accept": "application/json, text/plain;q=0.8, */*;q=0.5",
+    "User-Agent": "streamlit-linkedin-json-scraper/1.0",
+}
+
 def ordinal(n: int) -> str:
     if 10 <= n % 100 <= 20:
         suf = "th"
@@ -29,50 +41,86 @@ def ordinal(n: int) -> str:
         suf = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suf}"
 
-def fetch_with_key(slug: str, api_key: str):
-    conn = http.client.HTTPSConnection(HOST, timeout=20)
-    headers = {
-        "x-rapidapi-key": api_key,
-        "x-rapidapi-host": HOST,
-    }
-    try:
-        conn.request("GET", PATH.format(slug=quote_plus(slug)), headers=headers)
-        res = conn.getresponse()
-        body = res.read()
-        return res.status, body
-    finally:
-        conn.close()
+def normalize_slug(text: str) -> str:
+    t = text.strip()
+    if t.startswith("http"):
+        try:
+            p = urlparse(t)
+            segs = [s for s in p.path.split("/") if s]
+            if segs:
+                return segs[-1].strip("/")
+        except Exception:
+            pass
+    return t
 
-user_input = st.text_input("Enter LinkedIn vanity handle", placeholder="vidhant-jain")
+def call_api(slug: str, api_key: str):
+    headers = dict(HEADERS_BASE)
+    headers["x-rapidapi-key"] = api_key
+    url = BASE_URL.format(slug=quote_plus(slug))
+    return requests.get(url, headers=headers, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+
+user_input = st.text_input("Enter LinkedIn vanity handle or profile URL",
+                           placeholder="vidhant-jain or https://linkedin.com/in/vidhant-jain/")
 
 if st.button("Submit") and user_input.strip():
-    slug = user_input.strip()
-    top_msg.empty()  # clear previous run
-    with st.spinner("Fetching..."):
-        for i, key in enumerate([k for k in API_KEYS if k and k.strip()], start=1):
-            status, raw = fetch_with_key(slug, key)
+    try:
+        slug = normalize_slug(user_input)
+        success = False
+        logs = []
 
-            if status == 200:
-                # Top banner showing which key worked
-                top_msg.success(f"Fetched using {ordinal(i)} API key")
+        with st.spinner("Fetching..."):
+            for i, key in enumerate([k for k in API_KEYS if k and k.strip()], start=1):
+                for attempt in range(1, MAX_RETRIES_PER_KEY + 2):
+                    try:
+                        resp = call_api(slug, key)
+                        status, text = resp.status_code, resp.text
 
-                # Show body
-                try:
-                    parsed = json.loads(raw.decode("utf-8"))
-                    st.subheader(f"Fetched JSON using key {i}")
-                    st.json(parsed)
-                except json.JSONDecodeError:
-                    st.subheader(f"Received non JSON using key {i}")
-                    st.code(raw.decode("utf-8", errors="ignore")[:2000])
-                break
+                        if status == 200:
+                            top_msg.success(f"Fetched using {ordinal(i)} API key")
+                            try:
+                                st.subheader(f"Fetched JSON using key {i}")
+                                st.json(resp.json())
+                            except json.JSONDecodeError:
+                                st.subheader(f"Received non JSON using key {i}")
+                                st.code(text[:2000])
+                            logs.append(f"Key {i} success on attempt {attempt}.")
+                            success = True
+                            break
 
-            if status in (429, 403):
-                st.warning(f"Key {i} hit a limit or was blocked. Trying next key...")
-                continue
+                        if status in QUOTA_STATUSES:
+                            st.warning(f"Key {i} hit a limit or was blocked (HTTP {status}). Trying next key...")
+                            logs.append(f"Key {i} quota/blocked (HTTP {status}).")
+                            break  # move to next key
 
-            st.error(f"HTTP {status} with key {i}:\n{raw.decode('utf-8', errors='ignore')[:1000]}")
-            break
-        else:
-            st.error("All keys failed or were exhausted. Try again later.")
+                        if status in TRANSIENT_STATUSES:
+                            logs.append(f"Key {i} transient HTTP {status} on attempt {attempt}. Retrying...")
+                            time.sleep((0.6 * (2 ** (attempt - 1))) + random.uniform(0, 0.4))
+                            continue
 
-st.caption("Tip: move keys to environment variables or st.secrets in production.")
+                        # Hard error
+                        st.error(f"HTTP {status} with key {i}:\n{text[:1200]}")
+                        logs.append(f"Key {i} hard HTTP {status}. Body: {text[:200]}")
+                        break  # stop trying this key
+
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                        logs.append(f"Key {i} network error on attempt {attempt}: {e}. Retrying...")
+                        time.sleep((0.6 * (2 ** (attempt - 1))) + random.uniform(0, 0.4))
+                        continue
+
+                    except Exception as e:
+                        st.error(f"Unexpected error with key {i}: {e}")
+                        logs.append(f"Key {i} unexpected error: {e}")
+                        break  # move to next key
+
+                if success:
+                    break  # stop after first success
+
+        if not success:
+            st.error("All keys failed or were exhausted after retries.")
+        with st.expander("Debug log"):
+            st.write("\n".join(logs))
+
+    except Exception as outer:
+        # Final safety net so the app never throws a raw traceback
+        st.error(f"Something went wrong: {outer}")
+        st.info("Check Debug log and your RapidAPI usage. The app did not crash.")
