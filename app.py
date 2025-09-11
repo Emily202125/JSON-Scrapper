@@ -5,7 +5,7 @@ import streamlit as st
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-st.title("LinkedIn → Bright Data (Async, Hardcoded)")
+st.title("LinkedIn → Bright Data ") # (Async, Hardcoded)
 
 # ====== Hardcoded creds ======
 BRIGHTDATA_API_KEY = "8b81c258b672bca0a33d06f16629919e80e1facf10074179de06e476d66b2c72"
