@@ -11,7 +11,7 @@ import streamlit as st
 st.set_page_config(page_title="LinkedIn JSON Scraper (Bright Data)", layout="centered")
 st.title("LinkedIn JSON Scraper (Bright Data) – JSON only")
 
-# ---------- Config ----------
+# ---------- Config ---------
 DEFAULT_DATASET_ID = os.getenv("BRIGHTDATA_DATASET_ID", "gd_l1viktl72bvl7bjuj0")
 API_KEY = st.secrets.get("BRIGHTDATA_API_KEY", os.getenv("BRIGHTDATA_API_KEY", ""))
 
