@@ -57,7 +57,7 @@ def normalize_profile_input(text: str) -> str:
     return f"https://www.linkedin.com/in/{t.strip('/')}/"
 
 
-def trigger_collection(dataset_id: string, profile_url: str) -> str:
+def trigger_collection(dataset_id: str, profile_url: str) -> str:
     """
     Kick off a Bright Data dataset collection for a LinkedIn profile URL.
     Body shape for Web Scraper API is a JSON array of inputs. Using {"url": "..."}.
