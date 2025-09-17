@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import requests
 import streamlit as st
 
-# -----------------------------
+# -----------------------------=
 # Hardcoded defaults (yours)
 # -----------------------------
 DEFAULT_API_KEY = "8b81c258b672bca0a33d06f16629919e80e1facf10074179de06e476d66b2c72"
