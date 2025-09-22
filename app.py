@@ -7,6 +7,60 @@ from urllib.parse import quote_plus, urlparse
 import requests
 import streamlit as st
 
+# ===================== Password gate =====================
+
+AUTH_TTL_SECS = 24 * 60 * 60  # 24 hours
+
+
+def _get_app_password() -> str:
+    # Password fixed per your request
+    return "LF1234!!"
+
+
+def _auth_is_valid() -> bool:
+    exp = st.session_state.get("auth_expiry_ts")
+    authed = st.session_state.get("authed", False)
+    if not authed or not exp:
+        return False
+    if time.time() >= exp:
+        # expired
+        for k in ("authed", "auth_expiry_ts"):
+            st.session_state.pop(k, None)
+        return False
+    return True
+
+
+def _auth_gate():
+    st.title("🔒 LinkedIn JSON Scraper")
+    st.caption("This app is locked. Enter the password to continue.")
+    pw = st.text_input("Password", type="password", placeholder="Enter password")
+    if st.button("Unlock"):
+        if pw and pw == _get_app_password():
+            st.session_state["authed"] = True
+            st.session_state["auth_expiry_ts"] = time.time() + AUTH_TTL_SECS
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
+
+# Block access until authenticated
+if not _auth_is_valid():
+    _auth_gate()
+
+# Sidebar status and manual lock
+with st.sidebar:
+    secs_left = max(0, int(st.session_state["auth_expiry_ts"] - time.time()))
+    hrs = secs_left // 3600
+    mins = (secs_left % 3600) // 60
+    st.success(f"Unlocked • auto locks in {hrs}h {mins}m")
+    if st.button("Lock now"):
+        for k in ("authed", "auth_expiry_ts"):
+            st.session_state.pop(k, None)
+        st.rerun()
+
+# ===================== App body =====================
+
 st.title("LinkedIn JSON Scraper")
 top_msg = st.empty()  # banner placeholder
 
@@ -115,9 +169,7 @@ if st.button("Submit") and user_input.strip():
 
                         # Hard error
                         st.error(f"HTTP {status} with key {i}:\n{text[:1200]}")
-                        logs.append(
-                            f"Key {i} hard HTTP {status}. Body: {text[:200]}"
-                        )
+                        logs.append(f"Key {i} hard HTTP {status}. Body: {text[:200]}")
                         break  # stop trying this key
 
                     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
